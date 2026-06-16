@@ -1,59 +1,54 @@
-Java.perform(function () {
-    var ServerSocket = Java.use("java.net.ServerSocket");
-    var Socket = Java.use("java.net.Socket");
-    var PrintWriter = Java.use("java.io.PrintWriter");
-    var BufferedReader = Java.use("java.io.BufferedReader");
-    var InputStreamReader = Java.use("java.io.InputStreamReader");
-    var Thread = Java.use("java.lang.Thread");
+/*
+ * Frida script to directly send a purchase event to AppsFlyer SDK.
+ * The script waits 4 seconds for the app to fully launch, then calls
+ * AppsFlyerLib.logEvent() with revenue details.
+ */
 
-    var ActivityThread = Java.use("android.app.ActivityThread");
-    var context = ActivityThread.currentApplication().getApplicationContext();
+setTimeout(function () {
+    Java.perform(function () {
+        console.log("\n[+] Purchase Event Injector – sending af_purchase to AppsFlyer");
 
-    var server = ServerSocket.$new(27043);
-    console.log("[+] Engine listening on port 27043");
+        try {
+            // 1. Get the Application Context
+            var ActivityThread = Java.use("android.app.ActivityThread");
+            var context = ActivityThread.currentApplication().getApplicationContext();
+            if (context == null) {
+                console.log("[-] Failed to get ApplicationContext. Is the app running?");
+                return;
+            }
 
-    var Runnable = Java.registerClass({
-        name: 'com.engine.ServerLoop',
-        implements: [Java.use('java.lang.Runnable')],
-        methods: {
-            run: function () {
-                while (true) {
-                    try {
-                        var client = server.accept();
-                        var input = BufferedReader.$new(InputStreamReader.$new(client.getInputStream()));
-                        var output = PrintWriter.$new(client.getOutputStream(), true);
-                        var line = input.readLine();
-                        var response = "{}";
+            // 2. Prepare the event values (purchase details)
+            var HashMap = Java.use("java.util.HashMap");
+            var eventValues = HashMap.$new();
 
-                        try {
-                            var cmd = JSON.parse(line);
-                            if (cmd.action === "send_purchase") {
-                                var HashMap = Java.use("java.util.HashMap");
-                                var vals = HashMap.$new();
-                                vals.put("af_revenue", cmd.amount || "49.99");
-                                vals.put("af_currency", cmd.currency || "USD");
-                                vals.put("af_content_id", cmd.content_id || "coins");
-                                var AppsFlyerLib = Java.use("com.appsflyer.AppsFlyerLib");
-                                AppsFlyerLib.getInstance().logEvent(context, "af_purchase", vals);
-                                response = JSON.stringify({ status: "success", message: "Purchase sent: " + (cmd.amount || "49.99") });
-                            } else if (cmd.action === "ping") {
-                                response = JSON.stringify({ status: "success", message: "Engine ready" });
-                            }
-                        } catch (e) {
-                            response = JSON.stringify({ status: "error", message: e.message });
-                        }
+            // Required revenue fields for AppsFlyer
+            eventValues.put("af_revenue", "49.99");   // revenue as string
+            eventValues.put("af_currency", "USD");   // ISO 4217 currency code
+            eventValues.put("af_content_id", "Emeralds"); // optional product ID
 
-                        output.println(response);
-                        client.close();
-                    } catch (e) {
-                        console.log("[-] " + e);
-                    }
-                }
+            // Optional: you can add more keys like af_order_id, etc.
+            // eventValues.put("af_order_id", "test_order_123");
+
+            // 3. Event name – must be af_purchase for a purchase event
+            var eventName = "af_purchase";
+
+            // 4. Get the AppsFlyerLib instance and log the event
+            var AppsFlyerLib = Java.use("com.appsflyer.AppsFlyerLib");
+            var instance = AppsFlyerLib.getInstance();
+
+            console.log("    Event name : " + eventName);
+            console.log("    Event values : " + eventValues.toString());
+
+            instance.logEvent(context, eventName, eventValues);
+
+            console.log("[✓] Purchase event sent successfully!\n");
+        } catch (e) {
+            console.log("[-] Error: " + e.message);
+            if (e.stack) {
+                console.log(e.stack);
             }
         }
     });
+}, 4000); // 4-second delay to ensure the app and SDK are fully initialised
 
-    var thread = Thread.$new(Runnable.$new());
-    thread.start();
-    console.log("[+] Purchase Engine started");
-});
+console.log("[*] Purchase Event Injector loaded – waiting for app startup...");
